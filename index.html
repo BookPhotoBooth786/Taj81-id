@@ -114,7 +114,143 @@
   }
 </style>
 </head>
-<body>
+<body id="tajLockBody">
+<!-- ===== TAJ LICENSE GATE (protection) ===== -->
+<style>
+  #tajLockBody{visibility:hidden !important;}
+  #tajGate{position:fixed;inset:0;z-index:999999;background:linear-gradient(135deg,#1a1a1a,#2b2b2d);
+    display:flex;align-items:center;justify-content:center;padding:20px;font-family:'Segoe UI',Tahoma,sans-serif;visibility:visible !important;}
+  #tajGate .gcard{background:#fff;border-radius:18px;max-width:380px;width:100%;padding:30px 26px;box-shadow:0 20px 60px rgba(0,0,0,.4);text-align:center}
+  #tajGate .gtitle{font-size:20px;font-weight:800;color:#ED1C24;margin-bottom:4px}
+  #tajGate .gsub{font-size:13px;color:#666;margin-bottom:22px}
+  #tajGate input{width:100%;padding:13px 14px;border:2px solid #e0ddd7;border-radius:10px;font-size:16px;text-align:center;letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;font-weight:700;color:#111}
+  #tajGate input:focus{outline:none;border-color:#ED1C24}
+  #tajGate button{width:100%;padding:13px;border:none;border-radius:10px;background:#ED1C24;color:#fff;font-size:15px;font-weight:700;cursor:pointer}
+  #tajGate button:disabled{opacity:.6;cursor:default}
+  #tajGate .gmsg{font-size:13px;margin-top:12px;min-height:18px}
+  #tajGate .gmsg.err{color:#ED1C24}
+  #tajGate .gmsg.ok{color:#1a9c4e}
+  #tajGate .gfoot{font-size:11px;color:#999;margin-top:18px;line-height:1.5}
+  #tajGate .gspin{display:inline-block;width:16px;height:16px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:tajspin .7s linear infinite;vertical-align:middle}
+  @keyframes tajspin{to{transform:rotate(360deg)}}
+</style>
+
+<div id="tajGate">
+  <div class="gcard">
+    <div class="gtitle">Mehroz Taj-81</div>
+    <div class="gsub">ID Card Maker — License Activation</div>
+    <input id="tajKey" placeholder="LICENSE CODE" maxlength="19" autocomplete="off">
+    <button id="tajBtn" onclick="tajActivate()">Activate</button>
+    <div class="gmsg" id="tajMsg"></div>
+    <div class="gfoot">Yeh license sirf ek device par chalega.<br>Code ke liye raabta karein.</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  // ====== CONFIG: apne server ka URL yahan daalein ======
+  const TAJ_API = "/.netlify/functions/license";   // e.g. https://taj-id.netlify.app/.netlify/functions/license
+  // =======================================================
+
+  // device id (per-browser, persistent)
+  function tajDeviceId(){
+    let d = localStorage.getItem('taj_device_id');
+    if(!d){
+      d = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      localStorage.setItem('taj_device_id', d);
+    }
+    return d;
+  }
+
+  function fmtKey(v){
+    v = v.toUpperCase().replace(/[^A-Z0-9]/g,'');
+    let parts = v.match(/.{1,4}/g) || [];
+    return parts.join('-').slice(0,19);
+  }
+
+  function unlock(){
+    var g = document.getElementById('tajGate');
+    if(g) g.remove();
+    document.body.id = '';            // remove lock so content shows
+    document.documentElement.classList.remove('taj-locked');
+  }
+
+  async function verify(code, silent){
+    const body = { code: code, device: tajDeviceId() };
+    const res = await fetch(TAJ_API, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const data = await res.json().catch(()=>({ok:false,error:'bad response'}));
+    return data;
+  }
+
+  window.tajActivate = async function(){
+    const inp = document.getElementById('tajKey');
+    const btn = document.getElementById('tajBtn');
+    const msg = document.getElementById('tajMsg');
+    const code = (inp.value||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+    if(code.length < 8){ msg.className='gmsg err'; msg.textContent='Sahi code daalein.'; return; }
+    btn.disabled = true; msg.className='gmsg'; msg.innerHTML='<span class="gspin"></span>';
+    try{
+      const data = await verify(code, false);
+      if(data.ok){
+        localStorage.setItem('taj_license', code);
+        msg.className='gmsg ok'; msg.textContent='Activated ✓';
+        setTimeout(unlock, 500);
+      }else{
+        btn.disabled=false;
+        msg.className='gmsg err';
+        msg.textContent = tajErr(data.error);
+      }
+    }catch(e){
+      btn.disabled=false;
+      msg.className='gmsg err';
+      msg.textContent='Internet check karein, dobara koshish karein.';
+    }
+  };
+
+  function tajErr(code){
+    switch(code){
+      case 'invalid': return 'Code ghalat hai.';
+      case 'disabled': return 'Yeh license band kar diya gaya hai.';
+      case 'device_mismatch': return 'Yeh code doosre device par activate ho chuka hai.';
+      default: return 'Activation nahi hua. Raabta karein.';
+    }
+  }
+
+  // input formatting
+  document.addEventListener('DOMContentLoaded', function(){
+    var inp = document.getElementById('tajKey');
+    if(inp){
+      inp.addEventListener('input', function(){ this.value = fmtKey(this.value); });
+      inp.addEventListener('keydown', function(e){ if(e.key==='Enter') tajActivate(); });
+    }
+  });
+
+  // auto re-check on load if already licensed
+  async function autoCheck(){
+    const saved = localStorage.getItem('taj_license');
+    if(!saved){ return; }   // show gate
+    try{
+      const data = await verify(saved, true);
+      if(data.ok){ unlock(); }
+      else {
+        // license became invalid/disabled -> stay locked, clear
+        localStorage.removeItem('taj_license');
+        var msg = document.getElementById('tajMsg');
+        if(msg){ msg.className='gmsg err'; msg.textContent = tajErr(data.error); }
+      }
+    }catch(e){
+      // offline: if previously activated on THIS device, allow grace (optional)
+      // For strict mode, keep locked. We allow grace so customer can work offline once activated.
+      unlock();
+    }
+  }
+  autoCheck();
+})();
+</script>
+<!-- ===== END LICENSE GATE ===== -->
 
 <div class="bar">
   <h1><b>Taj Gasoline</b> · Mehroz Taj-81 — ID Card Maker</h1>
